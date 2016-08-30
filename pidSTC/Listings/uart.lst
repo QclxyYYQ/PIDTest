@@ -1,0 +1,212 @@
+C51 COMPILER V9.00   UART                                                                  05/19/2016 16:51:06 PAGE 1   
+
+
+C51 COMPILER V9.00, COMPILATION OF MODULE UART
+OBJECT MODULE PLACED IN .\Objects\uart.obj
+COMPILER INVOKED BY: D:\Keil_v5\C51\BIN\C51.EXE uart.c LARGE OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECTEXTEND PRINT(.\Listing
+                    -s\uart.lst) TABS(2) OBJECT(.\Objects\uart.obj)
+
+line level    source
+
+   1          
+   2          #include "uart.h"
+   3          #include <STC12C5A60S2.H>
+   4          
+   5          #include "pid.h"
+   6          extern Speed_Measure;
+   7          extern PID_Uint sPID;
+   8          extern PID_Uint *sptr;
+   9          extern SPK_Info();
+  10          extern unsigned char mode;
+  11          extern unsigned char PWM_DES;
+  12          void ByteToFloat(unsigned char *b,float *f)
+  13          {
+  14   1        char i=0;
+  15   1        unsigned char *t=(unsigned char *)f;
+  16   1        for(i=3;i>=0;i--)
+  17   1        {
+  18   2          t[i]=*(b+3-i);
+  19   2        }
+  20   1      }
+  21          void ByteToInt(unsigned char *b,int *f)
+  22          {
+  23   1        char i=0;
+  24   1        unsigned char *t=(unsigned char *)f;
+  25   1        for(i=1;i>=0;i--)
+  26   1        {
+  27   2          t[i]=*(b+1-i);
+  28   2        }
+  29   1      }
+  30          
+  31          void UartInit(void)   //115200bps@11.0592MHz 864B/s
+  32          {
+  33   1        PCON &= 0x7F;   //波特率不倍速
+  34   1        SCON = 0x50;    //8位数据,可变波特率
+  35   1        AUXR |= 0x04;   //独立波特率发生器时钟为Fosc,即1T
+  36   1        BRT = 0xFD;   //设定独立波特率发生器重装值
+  37   1        AUXR |= 0x01;   //串口1选择独立波特率发生器为波特率发生器
+  38   1        AUXR |= 0x10;   //启动独立波特率发生器
+  39   1        ES=1;
+  40   1      }
+  41          unsigned char recvBuf[20]={0};
+  42          unsigned char recvLen=0;
+  43          void UartRecv() interrupt 4
+  44          {
+  45   1        unsigned char recv=0;
+  46   1        static unsigned char index=0;
+  47   1        static bit isReceiving=0;
+  48   1        if(RI)
+  49   1        {
+  50   2          RI=0;
+  51   2          recv=SBUF;
+  52   2          if(isReceiving)
+  53   2          {
+  54   3            if(recvLen==0)
+C51 COMPILER V9.00   UART                                                                  05/19/2016 16:51:06 PAGE 2   
+
+  55   3            {
+  56   4              recvLen=recv;
+  57   4              
+  58   4              Speed_Measure=recvLen;
+  59   4              
+  60   4            }else{
+  61   4              recvBuf[index++]=recv;
+  62   4              
+  63   4              if(index==recvLen)
+  64   4              {
+  65   5                isReceiving=0;
+  66   5                UartProc();
+  67   5              }
+  68   4            }
+  69   3          }
+  70   2          else if(recv==Flag_First && isReceiving==0)
+  71   2          {
+  72   3            isReceiving=1;
+  73   3            recvLen=0;
+  74   3            index=0;
+  75   3            
+  76   3            Speed_Measure=1;
+  77   3            
+  78   3          }
+  79   2        }
+  80   1        if(TI)
+  81   1          TI=0;
+  82   1      }
+  83          
+  84          void UartProc()
+  85          {
+  86   1        switch(recvBuf[0])
+  87   1        {
+  88   2          case Flag_Start:
+  89   2            ET0=1;EX0=1;
+  90   2          
+  91   2            break;
+  92   2          case Flag_Stop:
+  93   2            ET0=0;EX0=0;
+  94   2          
+  95   2            break;
+  96   2          case Flag_SetPWM:
+  97   2            mode=1;
+  98   2            PWM_DES=recvBuf[1];
+  99   2            break;
+ 100   2          case Flag_SetTar:
+ 101   2            ByteToInt(recvBuf+1,&(sptr->SetValue));
+ 102   2            mode=0;
+ 103   2            break;
+ 104   2          case Flag_SetPID:
+ 105   2            ByteToFloat(recvBuf+1,&(sptr->Kp));
+ 106   2            ByteToFloat(recvBuf+5,&(sptr->Ki));
+ 107   2            ByteToFloat(recvBuf+9,&(sptr->Kd));
+ 108   2            break;
+ 109   2          case Flag_GetPID:
+ 110   2            UartSendPID(sptr);
+ 111   2            break;
+ 112   2          default:
+ 113   2            break;
+ 114   2        }
+ 115   1      }
+ 116          void UartSend(unsigned char *dat)
+C51 COMPILER V9.00   UART                                                                  05/19/2016 16:51:06 PAGE 3   
+
+ 117          {
+ 118   1        char j=100;
+ 119   1        while(*dat!='\0')
+ 120   1        {
+ 121   2          SBUF=*dat;
+ 122   2          j=100;
+ 123   2          while(j--);
+ 124   2          dat++;
+ 125   2        }
+ 126   1      }
+ 127          void UartSendByte(unsigned char dat)
+ 128          {
+ 129   1        char j=100;
+ 130   1        SBUF=dat;
+ 131   1        while(j--);
+ 132   1      }
+ 133          void UartSendFloat(float dat)
+ 134          {
+ 135   1        unsigned char *p=(unsigned char *)&dat;
+ 136   1        char i=0;
+ 137   1        char j=100;
+ 138   1        float t=dat;
+ 139   1        for(i=3;i>=0;i--)
+ 140   1        {
+ 141   2          SBUF=*(p+i);
+ 142   2          j=100;
+ 143   2          while(j--);
+ 144   2        }
+ 145   1      }
+ 146          void UartSendInt(int dat)
+ 147          {
+ 148   1        unsigned char *p=(unsigned char *)&dat;
+ 149   1        char i=0;
+ 150   1        char j=100;
+ 151   1        float t=dat;
+ 152   1        for(i=1;i>=0;i--)
+ 153   1        {
+ 154   2          SBUF=*(p+i);
+ 155   2          j=100;
+ 156   2          while(j--);
+ 157   2        }
+ 158   1      }
+ 159          void UartSendSpeed(int speed)
+ 160          {
+ 161   1        UartSendByte(Flag_First);
+ 162   1        UartSendByte(3);
+ 163   1        UartSendByte(Flag_GetSpeed);
+ 164   1        UartSendInt(speed);
+ 165   1      }
+ 166          void UartSendPWM(unsigned char pwm)
+ 167          {
+ 168   1        UartSendByte(Flag_First);
+ 169   1        UartSendByte(2);
+ 170   1        UartSendByte(Flag_GetPWM);
+ 171   1        UartSendByte(pwm);
+ 172   1      }
+ 173          void UartSendPID(PID_Uint *sptr)
+ 174          {
+ 175   1        UartSendByte(Flag_First);
+ 176   1        UartSendByte(13);
+ 177   1        UartSendByte(Flag_GetPID);
+ 178   1        UartSendFloat(sptr->Kp);
+C51 COMPILER V9.00   UART                                                                  05/19/2016 16:51:06 PAGE 4   
+
+ 179   1        UartSendFloat(sptr->Ki);
+ 180   1        UartSendFloat(sptr->Kd);
+ 181   1      }
+ 182          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    992    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =     22      45
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      1    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

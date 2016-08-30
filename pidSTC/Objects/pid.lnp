@@ -1,0 +1,6 @@
+".\Objects\main.obj",
+".\Objects\delay.obj",
+".\Objects\pid.obj",
+".\Objects\uart.obj" 
+TO ".\Objects\pid" 
+PRINT(".\Listings\pid.m51") RAMSIZE(256) 
